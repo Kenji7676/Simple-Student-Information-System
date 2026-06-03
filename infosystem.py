@@ -4,9 +4,11 @@ import csv
 import os
 import re
  
-STUDENT_CSV = "student.csv"
-PROGRAM_CSV = "program.csv"
-COLLEGE_CSV = "college.csv"
+import pathlib
+_BASE = pathlib.Path(__file__).parent
+STUDENT_CSV = str(_BASE / "student.csv")
+PROGRAM_CSV = str(_BASE / "program.csv")
+COLLEGE_CSV = str(_BASE / "college.csv")
  
 def ensure_csv(file, headers):
     if not os.path.exists(file):
@@ -44,6 +46,8 @@ class StudentDirectoryApp(tk.Tk):
         self.filter_win = None
         self.add_popup_win = None 
         self.edit_popup_win = None
+        self._file_mtimes = {}
+        self._auto_refresh_paused = False
         self.sidebar = tk.Frame(self, bg="#d2b48c", width=180)
         self.sidebar.pack(side="left", fill="y", padx=10, pady=10)
         self.active_section = tk.StringVar(value="Students")
@@ -62,10 +66,33 @@ class StudentDirectoryApp(tk.Tk):
         self.bind_all("<Button-1>", self.check_filter_focus)
         self.center_window(1150, 600)
         self.switch_section("Students")
+        self._start_auto_refresh()
  
     def handle_empty_search(self, *args):
         if self.search_var.get() == "":
             self.switch_section(self.active_section.get())
+
+    def _start_auto_refresh(self):
+        """Poll CSV mtimes every 1500 ms and refresh the view if any changed."""
+        changed = False
+        for f in [STUDENT_CSV, PROGRAM_CSV, COLLEGE_CSV]:
+            try:
+                mtime = os.path.getmtime(f)
+            except FileNotFoundError:
+                mtime = 0
+            if self._file_mtimes.get(f) != mtime:
+                self._file_mtimes[f] = mtime
+                changed = True
+        if changed and not self._auto_refresh_paused:
+            # Only refresh if no popup is open (avoids disrupting edits)
+            popup_open = (
+                (self.add_popup_win and self.add_popup_win.winfo_exists()) or
+                (self.edit_popup_win and self.edit_popup_win.winfo_exists()) or
+                (self.filter_win and self.filter_win.winfo_exists())
+            )
+            if not popup_open:
+                self.switch_section(self.active_section.get())
+        self.after(1500, self._start_auto_refresh)
  
     def toggle_edit_mode(self):
         self.edit_mode = not self.edit_mode
@@ -185,7 +212,9 @@ class StudentDirectoryApp(tk.Tk):
     def show_students(self):
         d = read_csv(STUDENT_CSV); p_map = {p["prog_code"]: p for p in read_csv(PROGRAM_CSV)}
         c_map = {c["college_code"]: c["name"] for c in read_csv(COLLEGE_CSV)}
-        rows = [[s["id"], f"{s['lastname']}, {s['firstname']}", s["gender"], s["year"], p_map.get(s["prog_code"], {}).get("name", "N/A"), c_map.get(p_map.get(s["prog_code"], {}).get("college_code"), "N/A")] for s in d]
+        def _prog(s): return p_map.get(s["prog_code"], {}).get("name", "Not Enrolled") if s["prog_code"] else "Not Enrolled"
+        def _coll(s): return c_map.get(p_map.get(s["prog_code"], {}).get("college_code"), "N/A") if s["prog_code"] else "N/A"
+        rows = [[s["id"], f"{s['lastname']}, {s['firstname']}", s["gender"], s["year"], _prog(s), _coll(s)] for s in d]
         q = self.search_var.get().lower()
         fdata = [r for r in rows if (not q or any(q in str(c).lower() for c in r)) and (not self.active_filters["gender"] or r[2] in self.active_filters["gender"]) and (not self.active_filters["year"] or str(r[3]) in self.active_filters["year"]) and (not self.active_filters["program"] or r[4] in self.active_filters["program"]) and (not self.active_filters["college"] or r[5] in self.active_filters["college"])]
         self.display_table(["ID", "Name", "Gender", "Year", "Program", "College"], fdata, "Students")
@@ -223,7 +252,7 @@ class StudentDirectoryApp(tk.Tk):
             fn_ent = tk.Entry(container, bg="#f4f4f4", bd=0); fn_ent.pack(fill="x", pady=5, ipady=3)
             tk.Label(container, text="Last Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
             ln_ent = tk.Entry(container, bg="#f4f4f4", bd=0); ln_ent.pack(fill="x", pady=5, ipady=3)
-            all_programs = read_csv(PROGRAM_CSV); prog_names = sorted([p['name'] for p in all_programs])
+            all_programs = read_csv(PROGRAM_CSV); prog_names = ["Not Enrolled"] + sorted([p['name'] for p in all_programs])
             prog_sel, _ = self.create_popup_dropdown(container, "Program", prog_names)
             year_sel, _ = self.create_popup_dropdown(container, "Year Level", ["1", "2", "3", "4", "5"])
             gen_sel, _ = self.create_popup_dropdown(container, "Gender", ["Male", "Female", "Other"])
@@ -236,10 +265,12 @@ class StudentDirectoryApp(tk.Tk):
                 if raw_id in existing_ids:
                     messagebox.showerror("Error", f"Student ID {raw_id} already exists.")
                     return
-                p_name = prog_sel["val"]; p_code = next((p['prog_code'] for p in all_programs if p['name'] == p_name), "")
-                vals = [raw_id, fn_ent.get().title(), ln_ent.get().title(), p_code, year_sel["val"], gen_sel["val"]]
-                if any(not v for v in vals): return messagebox.showwarning("!", "Fill all fields")
-                data = read_csv(STUDENT_CSV); data.append(dict(zip(["id", "firstname", "lastname", "prog_code", "year", "gender"], vals)))
+                p_name = prog_sel["val"]
+                p_code = "" if (not p_name or p_name == "Not Enrolled") else next((p['prog_code'] for p in all_programs if p['name'] == p_name), "")
+                fn = fn_ent.get().title(); ln = ln_ent.get().title()
+                yr = year_sel["val"]; gn = gen_sel["val"]
+                if not all([fn, ln, yr, gn]): return messagebox.showwarning("!", "Fill all fields")
+                data = read_csv(STUDENT_CSV); data.append({"id": raw_id, "firstname": fn, "lastname": ln, "prog_code": p_code, "year": yr, "gender": gn})
                 write_csv(STUDENT_CSV, data, ["id", "firstname", "lastname", "prog_code", "year", "gender"]); self.show_students(); self.add_popup_win.destroy()
             tk.Button(container, text="SAVE", bg="#8b4513", fg="white", font=("Arial", 10, "bold"), command=save).pack(pady=20)
         elif current == "Programs":
@@ -247,13 +278,18 @@ class StudentDirectoryApp(tk.Tk):
             c_ent = tk.Entry(container, bg="#f4f4f4", bd=0); c_ent.pack(fill="x", pady=5, ipady=3)
             tk.Label(container, text="Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
             n_ent = tk.Entry(container, bg="#f4f4f4", bd=0); n_ent.pack(fill="x", pady=5, ipady=3)
-            coll_sel, _ = self.create_popup_dropdown(container, "College", [f"{c['college_code']} - {c['name']}" for c in read_csv(COLLEGE_CSV)])
+            college_opts = ["N/A"] + [f"{c['college_code']} - {c['name']}" for c in read_csv(COLLEGE_CSV)]
+            coll_sel, _ = self.create_popup_dropdown(container, "College", college_opts)
             def save_p():
                 code = c_ent.get().strip().upper()
                 name = n_ent.get().strip().title()
-                cc = coll_sel["val"].split(" - ")[0] if " - " in coll_sel["val"] else ""
-                if not all([code, name, cc]):
+                raw_coll = coll_sel["val"]
+                cc = "" if (not raw_coll or raw_coll == "N/A") else (raw_coll.split(" - ")[0] if " - " in raw_coll else "")
+                if not all([code, name]):
                     messagebox.showwarning("!", "Fill all fields")
+                    return
+                if not raw_coll:
+                    messagebox.showwarning("!", "Please select a College (choose N/A if unaffiliated)")
                     return
                 data = read_csv(PROGRAM_CSV)
                 if any(p["prog_code"] == code for p in data):
@@ -307,40 +343,63 @@ class StudentDirectoryApp(tk.Tk):
         self.edit_popup_win.configure(bg="white")
         self.edit_popup_win.transient(self)
         self.edit_popup_win.grab_set()
-        self.center_window_small(self.edit_popup_win, 400, 680)
+        self.center_window_small(self.edit_popup_win, 400, 720)
         container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
         container.pack(fill="both", expand=True)
-        tk.Label(container, text="ID Number (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
-        id_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
-        id_ent.pack(fill="x", pady=(5,0), ipady=3)
-        id_ent.config(state="normal"); id_ent.insert(0, student_data["id"]); id_ent.config(state="readonly")
-        tk.Label(container, text="First Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10,0))
+
+        tk.Label(container, text="ID Number", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
+        id_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
+        id_ent.pack(fill="x", pady=(5, 0), ipady=3)
+        id_ent.insert(0, student_data["id"])
+        id_err = tk.Label(container, text="", font=("Arial", 7, "italic"), fg="red", bg="white", justify="left")
+        id_err.pack(anchor="w")
+
+        tk.Label(container, text="First Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(6, 0))
         fn_ent = tk.Entry(container, bg="#f4f4f4", bd=0); fn_ent.pack(fill="x", pady=5, ipady=3); fn_ent.insert(0, student_data["firstname"])
         tk.Label(container, text="Last Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
         ln_ent = tk.Entry(container, bg="#f4f4f4", bd=0); ln_ent.pack(fill="x", pady=5, ipady=3); ln_ent.insert(0, student_data["lastname"])
-        all_programs = read_csv(PROGRAM_CSV); prog_names = sorted([p['name'] for p in all_programs])
-        current_prog_name = next((p['name'] for p in all_programs if p['prog_code'] == student_data["prog_code"]), "")
+
+        all_programs = read_csv(PROGRAM_CSV); prog_names = ["Not Enrolled"] + sorted([p['name'] for p in all_programs])
+        current_prog_name = next((p['name'] for p in all_programs if p['prog_code'] == student_data["prog_code"]), "Not Enrolled")
         prog_sel, _ = self.create_popup_dropdown(container, "Program", prog_names, default_value=current_prog_name)
         year_sel, _ = self.create_popup_dropdown(container, "Year Level", ["1", "2", "3", "4", "5"], default_value=student_data["year"])
         gen_sel, _ = self.create_popup_dropdown(container, "Gender", ["Male", "Female", "Other"], default_value=student_data["gender"])
         btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
+
         def save_changes():
+            id_err.config(text="")
+            new_id = id_ent.get().strip()
             new_firstname = fn_ent.get().title().strip()
             new_lastname = ln_ent.get().title().strip()
             new_gender = gen_sel["val"]; new_year = year_sel["val"]; new_prog_name = prog_sel["val"]
-            if not all([new_firstname, new_lastname, new_gender, new_year, new_prog_name]):
+
+            # Validate ID format
+            if not re.match(r"^\d{4}-\d{4}$", new_id):
+                id_err.config(text="ID must follow format YYYY-NNNN (e.g. 2024-0001)"); return
+
+            if not all([new_firstname, new_lastname, new_gender, new_year]):
                 messagebox.showwarning("Warning", "Please fill all fields."); return
-            new_prog_code = next((p['prog_code'] for p in all_programs if p['name'] == new_prog_name), "")
-            if not new_prog_code:
-                messagebox.showerror("Error", "Invalid program selected."); return
+            if not new_prog_name:
+                messagebox.showwarning("Warning", "Please select a Program (choose Not Enrolled if unaffiliated)."); return
+
+            new_prog_code = "" if new_prog_name == "Not Enrolled" else next((p['prog_code'] for p in all_programs if p['name'] == new_prog_name), "")
+
             students_data = read_csv(STUDENT_CSV)
-            for i, student in enumerate(students_data):
-                if student["id"] == student_data["id"]:
-                    students_data[i] = {"id": student_data["id"], "firstname": new_firstname, "lastname": new_lastname,
+            old_id = student_data["id"]
+
+            # Duplicate check — only if the ID actually changed
+            if new_id != old_id:
+                if any(s["id"] == new_id for s in students_data):
+                    id_err.config(text=f"ID '{new_id}' already exists."); return
+
+            for i, s in enumerate(students_data):
+                if s["id"] == old_id:
+                    students_data[i] = {"id": new_id, "firstname": new_firstname, "lastname": new_lastname,
                                         "prog_code": new_prog_code, "year": new_year, "gender": new_gender}; break
             write_csv(STUDENT_CSV, students_data, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
             self.show_students(); self.edit_popup_win.destroy()
             messagebox.showinfo("Success", "Student information updated successfully!")
+
         tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white", font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
         tk.Button(btn_frame, text="CANCEL", bg="gray", fg="white", font=("Arial", 10, "bold"), command=self.edit_popup_win.destroy).pack(side="left", padx=5)
 
@@ -367,56 +426,70 @@ class StudentDirectoryApp(tk.Tk):
         self.edit_popup_win.configure(bg="white")
         self.edit_popup_win.transient(self)
         self.edit_popup_win.grab_set()
-        self.center_window_small(self.edit_popup_win, 400, 400)
+        self.center_window_small(self.edit_popup_win, 400, 440)
         container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
         container.pack(fill="both", expand=True)
 
-        # Code (read-only — changing the PK would break student FK references)
-        tk.Label(container, text="Program Code (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
-        code_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
+        tk.Label(container, text="Program Code", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
+        code_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
         code_ent.pack(fill="x", pady=(5, 0), ipady=3)
-        code_ent.config(state="normal"); code_ent.insert(0, prog_data["prog_code"]); code_ent.config(state="readonly")
+        code_ent.insert(0, prog_data["prog_code"])
+        code_err = tk.Label(container, text="", font=("Arial", 7, "italic"), fg="red", bg="white", justify="left")
+        code_err.pack(anchor="w")
 
-        tk.Label(container, text="Program Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10, 0))
+        tk.Label(container, text="Program Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(6, 0))
         name_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
         name_ent.pack(fill="x", pady=5, ipady=3)
         name_ent.insert(0, prog_data["name"])
 
         all_colleges = read_csv(COLLEGE_CSV)
-        college_options = [f"{c['college_code']} - {c['name']}" for c in all_colleges]
+        college_options = ["N/A"] + [f"{c['college_code']} - {c['name']}" for c in all_colleges]
         current_college_opt = next(
-            (f"{c['college_code']} - {c['name']}" for c in all_colleges if c["college_code"] == prog_data["college_code"]), "")
+            (f"{c['college_code']} - {c['name']}" for c in all_colleges if c["college_code"] == prog_data["college_code"]), "N/A")
         coll_sel, _ = self.create_popup_dropdown(container, "College", college_options, default_value=current_college_opt)
 
         btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
 
         def save_changes():
+            code_err.config(text="")
+            new_code = code_ent.get().strip().upper()
             new_name = name_ent.get().strip().title()
             new_coll_opt = coll_sel["val"]
-            new_college_code = new_coll_opt.split(" - ")[0] if " - " in new_coll_opt else ""
-            if not all([new_name, new_college_code]):
-                messagebox.showwarning("Warning", "Please fill all fields."); return
+            new_college_code = "" if (not new_coll_opt or new_coll_opt == "N/A") else (new_coll_opt.split(" - ")[0] if " - " in new_coll_opt else "")
 
-            # Update program record
+            if not new_code:
+                code_err.config(text="Program code cannot be empty."); return
+            if not new_name:
+                messagebox.showwarning("Warning", "Please fill all fields."); return
+            if not new_coll_opt:
+                messagebox.showwarning("Warning", "Please select a College (choose N/A if unaffiliated)."); return
+
+            old_code = prog_data["prog_code"]
             programs = read_csv(PROGRAM_CSV)
-            old_name = prog_data["name"]
+
+            # Duplicate check — only if the code actually changed
+            if new_code != old_code:
+                if any(p["prog_code"] == new_code for p in programs):
+                    code_err.config(text=f"Program code '{new_code}' already exists."); return
+
+            # Update program record (code + name + college)
             for i, p in enumerate(programs):
-                if p["prog_code"] == prog_data["prog_code"]:
-                    programs[i]["name"] = new_name
-                    programs[i]["college_code"] = new_college_code
-                    break
+                if p["prog_code"] == old_code:
+                    programs[i] = {"prog_code": new_code, "name": new_name, "college_code": new_college_code}; break
             write_csv(PROGRAM_CSV, programs, ["prog_code", "name", "college_code"])
 
-            # Students reference prog_code (unchanged), so no student CSV update needed.
-            # But inform user if the displayed program name changes.
+            # Cascade: update all students whose prog_code matched the old code
+            if new_code != old_code:
+                students = read_csv(STUDENT_CSV)
+                affected = 0
+                for i, s in enumerate(students):
+                    if s["prog_code"] == old_code:
+                        students[i]["prog_code"] = new_code; affected += 1
+                write_csv(STUDENT_CSV, students, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
+
             self.show_programs()
             self.edit_popup_win.destroy()
-            changed = []
-            if new_name != old_name: changed.append("program name")
-            if new_college_code != prog_data["college_code"]: changed.append("college")
-            detail = f"Updated: {', '.join(changed)}. " if changed else ""
-            messagebox.showinfo("Success", f"Program updated successfully!\n{detail}"
-                                           f"All students enrolled in this program will reflect the new details.")
+            messagebox.showinfo("Success", "Program updated successfully!\nAll enrolled students reflect the new details.")
 
         tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white",
                   font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
@@ -446,17 +519,18 @@ class StudentDirectoryApp(tk.Tk):
         self.edit_popup_win.configure(bg="white")
         self.edit_popup_win.transient(self)
         self.edit_popup_win.grab_set()
-        self.center_window_small(self.edit_popup_win, 400, 320)
+        self.center_window_small(self.edit_popup_win, 400, 340)
         container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
         container.pack(fill="both", expand=True)
 
-        # College code is the PK referenced by programs → keep read-only
-        tk.Label(container, text="College Code (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
-        code_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
+        tk.Label(container, text="College Code", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
+        code_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
         code_ent.pack(fill="x", pady=(5, 0), ipady=3)
-        code_ent.config(state="normal"); code_ent.insert(0, college_data["college_code"]); code_ent.config(state="readonly")
+        code_ent.insert(0, college_data["college_code"])
+        code_err = tk.Label(container, text="", font=("Arial", 7, "italic"), fg="red", bg="white", justify="left")
+        code_err.pack(anchor="w")
 
-        tk.Label(container, text="College Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10, 0))
+        tk.Label(container, text="College Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(6, 0))
         name_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
         name_ent.pack(fill="x", pady=5, ipady=3)
         name_ent.insert(0, college_data["name"])
@@ -464,22 +538,40 @@ class StudentDirectoryApp(tk.Tk):
         btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
 
         def save_changes():
+            code_err.config(text="")
+            new_code = code_ent.get().strip().upper()
             new_name = name_ent.get().strip().title()
+
+            if not new_code:
+                code_err.config(text="College code cannot be empty."); return
             if not new_name:
                 messagebox.showwarning("Warning", "College name cannot be empty."); return
 
-            # Update college record — programs reference college_code (unchanged),
-            # so they automatically resolve to the new name on next display.
+            old_code = college_data["college_code"]
             colleges = read_csv(COLLEGE_CSV)
-            old_name = college_data["name"]
+
+            # Duplicate check — only if the code actually changed
+            if new_code != old_code:
+                if any(c["college_code"] == new_code for c in colleges):
+                    code_err.config(text=f"College code '{new_code}' already exists."); return
+
+            # Update college record
             for i, c in enumerate(colleges):
-                if c["college_code"] == college_data["college_code"]:
-                    colleges[i]["name"] = new_name; break
+                if c["college_code"] == old_code:
+                    colleges[i] = {"college_code": new_code, "name": new_name}; break
             write_csv(COLLEGE_CSV, colleges, ["college_code", "name"])
 
-            # Count affected programs and students for the confirmation message
-            programs = read_csv(PROGRAM_CSV)
-            affected_prog_codes = [p["prog_code"] for p in programs if p["college_code"] == college_data["college_code"]]
+            # Cascade: update all programs whose college_code matched the old code
+            if new_code != old_code:
+                programs = read_csv(PROGRAM_CSV)
+                for i, p in enumerate(programs):
+                    if p["college_code"] == old_code:
+                        programs[i]["college_code"] = new_code
+                write_csv(PROGRAM_CSV, programs, ["prog_code", "name", "college_code"])
+
+            # Count affected for confirmation message
+            programs_now = read_csv(PROGRAM_CSV)
+            affected_prog_codes = [p["prog_code"] for p in programs_now if p["college_code"] == new_code]
             students = read_csv(STUDENT_CSV)
             affected_students = sum(1 for s in students if s["prog_code"] in affected_prog_codes)
 
@@ -487,9 +579,9 @@ class StudentDirectoryApp(tk.Tk):
             self.edit_popup_win.destroy()
             messagebox.showinfo(
                 "Success",
-                f"College name updated from '{old_name}' to '{new_name}'.\n"
+                f"College updated successfully!\n"
                 f"{len(affected_prog_codes)} program(s) and {affected_students} student(s) "
-                f"will reflect this change automatically."
+                f"reflect the changes automatically."
             )
 
         tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white",
@@ -562,9 +654,55 @@ class StudentDirectoryApp(tk.Tk):
     def delete_selected(self, section):
         fn, pk = {"Students": (STUDENT_CSV, "id"), "Programs": (PROGRAM_CSV, "prog_code"), "Colleges": (COLLEGE_CSV, "college_code")}[section]
         head = {"Students": ["id", "firstname", "lastname", "prog_code", "year", "gender"], "Programs": ["prog_code", "name", "college_code"], "Colleges": ["college_code", "name"]}[section]
-        data = read_csv(fn); to_del = [self.tree.item(i, "values")[1] for i in self.tree.get_children() if self.tree.item(i, "values")[0] == "[X]"]
-        if to_del and messagebox.askyesno("Confirm", f"Delete {len(to_del)} items?"):
-            write_csv(fn, [r for r in data if r[pk] not in to_del], head); self.switch_section(section)
+        data = read_csv(fn)
+        to_del = [self.tree.item(i, "values")[1] for i in self.tree.get_children() if self.tree.item(i, "values")[0] == "[X]"]
+        if not to_del:
+            return
+
+        # Build confirmation message with cascade warning
+        confirm_msg = f"Delete {len(to_del)} item(s)?"
+        if section == "Programs":
+            students = read_csv(STUDENT_CSV)
+            affected = sum(1 for s in students if s["prog_code"] in to_del)
+            if affected:
+                confirm_msg += f"\n\n{affected} student(s) enrolled in these programs will be marked as Not Enrolled."
+        elif section == "Colleges":
+            programs = read_csv(PROGRAM_CSV)
+            affected_progs = [p["prog_code"] for p in programs if p["college_code"] in to_del]
+            students = read_csv(STUDENT_CSV)
+            affected_studs = sum(1 for s in students if s["prog_code"] in affected_progs)
+            if affected_progs or affected_studs:
+                confirm_msg += f"\n\n{len(affected_progs)} program(s) under these colleges will also be deleted, and {affected_studs} student(s) will be marked as Not Enrolled."
+
+        if not messagebox.askyesno("Confirm", confirm_msg):
+            return
+
+        # Perform deletion
+        write_csv(fn, [r for r in data if r[pk] not in to_del], head)
+
+        # Cascade effects
+        if section == "Programs":
+            # Unenroll students whose program was deleted
+            students = read_csv(STUDENT_CSV)
+            for i, s in enumerate(students):
+                if s["prog_code"] in to_del:
+                    students[i]["prog_code"] = ""
+            write_csv(STUDENT_CSV, students, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
+
+        elif section == "Colleges":
+            # Delete all programs under deleted colleges, then unenroll affected students
+            programs = read_csv(PROGRAM_CSV)
+            deleted_prog_codes = [p["prog_code"] for p in programs if p["college_code"] in to_del]
+            remaining_programs = [p for p in programs if p["college_code"] not in to_del]
+            write_csv(PROGRAM_CSV, remaining_programs, ["prog_code", "name", "college_code"])
+            if deleted_prog_codes:
+                students = read_csv(STUDENT_CSV)
+                for i, s in enumerate(students):
+                    if s["prog_code"] in deleted_prog_codes:
+                        students[i]["prog_code"] = ""
+                write_csv(STUDENT_CSV, students, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
+
+        self.switch_section(section)
  
 if __name__ == "__main__":
     app = StudentDirectoryApp(); app.mainloop()
