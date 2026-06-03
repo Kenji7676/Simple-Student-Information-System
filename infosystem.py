@@ -143,6 +143,10 @@ class StudentDirectoryApp(tk.Tk):
             tk.Button(ctrls, text="Delete Selected", bg="#ff4d4d", fg="white", command=lambda: self.delete_selected(section_type)).pack(side="left", padx=2)
             if section_type == "Students":
                 tk.Button(ctrls, text="Edit Selected", bg="#4CAF50", fg="white", command=self.edit_selected_student).pack(side="left", padx=2)
+            elif section_type == "Programs":
+                tk.Button(ctrls, text="Edit Selected", bg="#4CAF50", fg="white", command=self.edit_selected_program).pack(side="left", padx=2)
+            elif section_type == "Colleges":
+                tk.Button(ctrls, text="Edit Selected", bg="#4CAF50", fg="white", command=self.edit_selected_college).pack(side="left", padx=2)
             tk.Button(ctrls, text="Cancel", bg="gray", fg="white", command=self.toggle_edit_mode).pack(side="left", padx=2)
         else:
             s_ent = tk.Entry(ctrls, textvariable=self.search_var, font=("Arial", 10), width=25, bg="#f4f4f4", bd=0)
@@ -228,7 +232,6 @@ class StudentDirectoryApp(tk.Tk):
                 raw_id = id_ent.get().strip()
                 if not re.match(r"^\d{4}-\d{4}$", raw_id):
                     err_msg.pack(anchor="e"); return
-                # Check for duplicate ID
                 existing_ids = [s["id"] for s in read_csv(STUDENT_CSV)]
                 if raw_id in existing_ids:
                     messagebox.showerror("Error", f"Student ID {raw_id} already exists.")
@@ -278,117 +281,224 @@ class StudentDirectoryApp(tk.Tk):
                 write_csv(COLLEGE_CSV, data, ["college_code", "name"]); self.show_colleges(); self.add_popup_win.destroy()
             tk.Button(container, text="SAVE", bg="#8b4513", fg="white", font=("Arial", 10, "bold"), command=save_c).pack(pady=20)
  
+    # ── Students ──────────────────────────────────────────────────────────────
+
     def edit_selected_student(self):
         selected_items = [item for item in self.tree.get_children() 
                          if self.tree.item(item, "values")[0] == "[X]"]
-        
         if not selected_items:
             messagebox.showwarning("Warning", "Please select a student to edit.")
             return
-        
         if len(selected_items) > 1:
             messagebox.showwarning("Warning", "Please select only one student to edit.")
             return
-        
-        selected_values = self.tree.item(selected_items[0], "values")
-        # In edit mode columns are: Select(0), ID(1), Name(2), Gender(3), Year(4), Program(5), College(6)
-        student_id = selected_values[1]
-        
-        students_data = read_csv(STUDENT_CSV)
-        student_data = next((s for s in students_data if s["id"] == student_id), None)
-        
+        student_id = self.tree.item(selected_items[0], "values")[1]
+        student_data = next((s for s in read_csv(STUDENT_CSV) if s["id"] == student_id), None)
         if not student_data:
             messagebox.showerror("Error", "Student data not found.")
             return
-        
         self.open_edit_student_popup(student_data)
  
     def open_edit_student_popup(self, student_data):
         if self.edit_popup_win and self.edit_popup_win.winfo_exists():
-            self.edit_popup_win.lift()
-            return
-            
+            self.edit_popup_win.lift(); return
         self.edit_popup_win = tk.Toplevel(self)
         self.edit_popup_win.title("Edit Student")
         self.edit_popup_win.configure(bg="white")
         self.edit_popup_win.transient(self)
         self.edit_popup_win.grab_set()
         self.center_window_small(self.edit_popup_win, 400, 680)
-        
         container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
         container.pack(fill="both", expand=True)
-        
         tk.Label(container, text="ID Number (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
         id_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
         id_ent.pack(fill="x", pady=(5,0), ipady=3)
-        id_ent.config(state="normal")
-        id_ent.insert(0, student_data["id"])
-        id_ent.config(state="readonly")
-        
+        id_ent.config(state="normal"); id_ent.insert(0, student_data["id"]); id_ent.config(state="readonly")
         tk.Label(container, text="First Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10,0))
-        fn_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
-        fn_ent.pack(fill="x", pady=5, ipady=3)
-        fn_ent.insert(0, student_data["firstname"])
-        
+        fn_ent = tk.Entry(container, bg="#f4f4f4", bd=0); fn_ent.pack(fill="x", pady=5, ipady=3); fn_ent.insert(0, student_data["firstname"])
         tk.Label(container, text="Last Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
-        ln_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
-        ln_ent.pack(fill="x", pady=5, ipady=3)
-        ln_ent.insert(0, student_data["lastname"])
-        
-        all_programs = read_csv(PROGRAM_CSV)
-        prog_names = sorted([p['name'] for p in all_programs])
+        ln_ent = tk.Entry(container, bg="#f4f4f4", bd=0); ln_ent.pack(fill="x", pady=5, ipady=3); ln_ent.insert(0, student_data["lastname"])
+        all_programs = read_csv(PROGRAM_CSV); prog_names = sorted([p['name'] for p in all_programs])
         current_prog_name = next((p['name'] for p in all_programs if p['prog_code'] == student_data["prog_code"]), "")
         prog_sel, _ = self.create_popup_dropdown(container, "Program", prog_names, default_value=current_prog_name)
-        
         year_sel, _ = self.create_popup_dropdown(container, "Year Level", ["1", "2", "3", "4", "5"], default_value=student_data["year"])
-        
         gen_sel, _ = self.create_popup_dropdown(container, "Gender", ["Male", "Female", "Other"], default_value=student_data["gender"])
-        
-        btn_frame = tk.Frame(container, bg="white")
-        btn_frame.pack(pady=20)
-        
+        btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
         def save_changes():
             new_firstname = fn_ent.get().title().strip()
             new_lastname = ln_ent.get().title().strip()
-            new_gender = gen_sel["val"]
-            new_year = year_sel["val"]
-            new_prog_name = prog_sel["val"]
-            
+            new_gender = gen_sel["val"]; new_year = year_sel["val"]; new_prog_name = prog_sel["val"]
             if not all([new_firstname, new_lastname, new_gender, new_year, new_prog_name]):
-                messagebox.showwarning("Warning", "Please fill all fields.")
-                return
-            
+                messagebox.showwarning("Warning", "Please fill all fields."); return
             new_prog_code = next((p['prog_code'] for p in all_programs if p['name'] == new_prog_name), "")
             if not new_prog_code:
-                messagebox.showerror("Error", "Invalid program selected.")
-                return
-            
+                messagebox.showerror("Error", "Invalid program selected."); return
             students_data = read_csv(STUDENT_CSV)
             for i, student in enumerate(students_data):
                 if student["id"] == student_data["id"]:
-                    students_data[i] = {
-                        "id": student_data["id"],
-                        "firstname": new_firstname,
-                        "lastname": new_lastname,
-                        "prog_code": new_prog_code,
-                        "year": new_year,
-                        "gender": new_gender
-                    }
-                    break
-            
+                    students_data[i] = {"id": student_data["id"], "firstname": new_firstname, "lastname": new_lastname,
+                                        "prog_code": new_prog_code, "year": new_year, "gender": new_gender}; break
             write_csv(STUDENT_CSV, students_data, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
-            self.show_students()
-            self.edit_popup_win.destroy()
+            self.show_students(); self.edit_popup_win.destroy()
             messagebox.showinfo("Success", "Student information updated successfully!")
-        
-        def cancel_edit():
+        tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white", font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="CANCEL", bg="gray", fg="white", font=("Arial", 10, "bold"), command=self.edit_popup_win.destroy).pack(side="left", padx=5)
+
+    # ── Programs ──────────────────────────────────────────────────────────────
+
+    def edit_selected_program(self):
+        selected_items = [item for item in self.tree.get_children()
+                          if self.tree.item(item, "values")[0] == "[X]"]
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select a program to edit."); return
+        if len(selected_items) > 1:
+            messagebox.showwarning("Warning", "Please select only one program to edit."); return
+        prog_code = self.tree.item(selected_items[0], "values")[1]
+        prog_data = next((p for p in read_csv(PROGRAM_CSV) if p["prog_code"] == prog_code), None)
+        if not prog_data:
+            messagebox.showerror("Error", "Program data not found."); return
+        self.open_edit_program_popup(prog_data)
+
+    def open_edit_program_popup(self, prog_data):
+        if self.edit_popup_win and self.edit_popup_win.winfo_exists():
+            self.edit_popup_win.lift(); return
+        self.edit_popup_win = tk.Toplevel(self)
+        self.edit_popup_win.title("Edit Program")
+        self.edit_popup_win.configure(bg="white")
+        self.edit_popup_win.transient(self)
+        self.edit_popup_win.grab_set()
+        self.center_window_small(self.edit_popup_win, 400, 400)
+        container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
+        container.pack(fill="both", expand=True)
+
+        # Code (read-only — changing the PK would break student FK references)
+        tk.Label(container, text="Program Code (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
+        code_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
+        code_ent.pack(fill="x", pady=(5, 0), ipady=3)
+        code_ent.config(state="normal"); code_ent.insert(0, prog_data["prog_code"]); code_ent.config(state="readonly")
+
+        tk.Label(container, text="Program Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10, 0))
+        name_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
+        name_ent.pack(fill="x", pady=5, ipady=3)
+        name_ent.insert(0, prog_data["name"])
+
+        all_colleges = read_csv(COLLEGE_CSV)
+        college_options = [f"{c['college_code']} - {c['name']}" for c in all_colleges]
+        current_college_opt = next(
+            (f"{c['college_code']} - {c['name']}" for c in all_colleges if c["college_code"] == prog_data["college_code"]), "")
+        coll_sel, _ = self.create_popup_dropdown(container, "College", college_options, default_value=current_college_opt)
+
+        btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
+
+        def save_changes():
+            new_name = name_ent.get().strip().title()
+            new_coll_opt = coll_sel["val"]
+            new_college_code = new_coll_opt.split(" - ")[0] if " - " in new_coll_opt else ""
+            if not all([new_name, new_college_code]):
+                messagebox.showwarning("Warning", "Please fill all fields."); return
+
+            # Update program record
+            programs = read_csv(PROGRAM_CSV)
+            old_name = prog_data["name"]
+            for i, p in enumerate(programs):
+                if p["prog_code"] == prog_data["prog_code"]:
+                    programs[i]["name"] = new_name
+                    programs[i]["college_code"] = new_college_code
+                    break
+            write_csv(PROGRAM_CSV, programs, ["prog_code", "name", "college_code"])
+
+            # Students reference prog_code (unchanged), so no student CSV update needed.
+            # But inform user if the displayed program name changes.
+            self.show_programs()
             self.edit_popup_win.destroy()
-        
-        tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white", 
-                 font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="CANCEL", bg="gray", fg="white", 
-                 font=("Arial", 10, "bold"), command=cancel_edit).pack(side="left", padx=5)
- 
+            changed = []
+            if new_name != old_name: changed.append("program name")
+            if new_college_code != prog_data["college_code"]: changed.append("college")
+            detail = f"Updated: {', '.join(changed)}. " if changed else ""
+            messagebox.showinfo("Success", f"Program updated successfully!\n{detail}"
+                                           f"All students enrolled in this program will reflect the new details.")
+
+        tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white",
+                  font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="CANCEL", bg="gray", fg="white",
+                  font=("Arial", 10, "bold"), command=self.edit_popup_win.destroy).pack(side="left", padx=5)
+
+    # ── Colleges ──────────────────────────────────────────────────────────────
+
+    def edit_selected_college(self):
+        selected_items = [item for item in self.tree.get_children()
+                          if self.tree.item(item, "values")[0] == "[X]"]
+        if not selected_items:
+            messagebox.showwarning("Warning", "Please select a college to edit."); return
+        if len(selected_items) > 1:
+            messagebox.showwarning("Warning", "Please select only one college to edit."); return
+        college_code = self.tree.item(selected_items[0], "values")[1]
+        college_data = next((c for c in read_csv(COLLEGE_CSV) if c["college_code"] == college_code), None)
+        if not college_data:
+            messagebox.showerror("Error", "College data not found."); return
+        self.open_edit_college_popup(college_data)
+
+    def open_edit_college_popup(self, college_data):
+        if self.edit_popup_win and self.edit_popup_win.winfo_exists():
+            self.edit_popup_win.lift(); return
+        self.edit_popup_win = tk.Toplevel(self)
+        self.edit_popup_win.title("Edit College")
+        self.edit_popup_win.configure(bg="white")
+        self.edit_popup_win.transient(self)
+        self.edit_popup_win.grab_set()
+        self.center_window_small(self.edit_popup_win, 400, 320)
+        container = tk.Frame(self.edit_popup_win, bg="white", padx=20, pady=20)
+        container.pack(fill="both", expand=True)
+
+        # College code is the PK referenced by programs → keep read-only
+        tk.Label(container, text="College Code (Read Only)", bg="white", font=("Arial", 8, "bold")).pack(anchor="w")
+        code_ent = tk.Entry(container, bg="#e0e0e0", bd=0, state="readonly")
+        code_ent.pack(fill="x", pady=(5, 0), ipady=3)
+        code_ent.config(state="normal"); code_ent.insert(0, college_data["college_code"]); code_ent.config(state="readonly")
+
+        tk.Label(container, text="College Name", bg="white", font=("Arial", 8, "bold")).pack(anchor="w", pady=(10, 0))
+        name_ent = tk.Entry(container, bg="#f4f4f4", bd=0)
+        name_ent.pack(fill="x", pady=5, ipady=3)
+        name_ent.insert(0, college_data["name"])
+
+        btn_frame = tk.Frame(container, bg="white"); btn_frame.pack(pady=20)
+
+        def save_changes():
+            new_name = name_ent.get().strip().title()
+            if not new_name:
+                messagebox.showwarning("Warning", "College name cannot be empty."); return
+
+            # Update college record — programs reference college_code (unchanged),
+            # so they automatically resolve to the new name on next display.
+            colleges = read_csv(COLLEGE_CSV)
+            old_name = college_data["name"]
+            for i, c in enumerate(colleges):
+                if c["college_code"] == college_data["college_code"]:
+                    colleges[i]["name"] = new_name; break
+            write_csv(COLLEGE_CSV, colleges, ["college_code", "name"])
+
+            # Count affected programs and students for the confirmation message
+            programs = read_csv(PROGRAM_CSV)
+            affected_prog_codes = [p["prog_code"] for p in programs if p["college_code"] == college_data["college_code"]]
+            students = read_csv(STUDENT_CSV)
+            affected_students = sum(1 for s in students if s["prog_code"] in affected_prog_codes)
+
+            self.show_colleges()
+            self.edit_popup_win.destroy()
+            messagebox.showinfo(
+                "Success",
+                f"College name updated from '{old_name}' to '{new_name}'.\n"
+                f"{len(affected_prog_codes)} program(s) and {affected_students} student(s) "
+                f"will reflect this change automatically."
+            )
+
+        tk.Button(btn_frame, text="SAVE CHANGES", bg="#8b4513", fg="white",
+                  font=("Arial", 10, "bold"), command=save_changes).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="CANCEL", bg="gray", fg="white",
+                  font=("Arial", 10, "bold"), command=self.edit_popup_win.destroy).pack(side="left", padx=5)
+
+    # ── Filter / misc ─────────────────────────────────────────────────────────
+
     def show_filter_menu(self, widget):
         if self.filter_win and self.filter_win.winfo_exists():
             self.filter_win.destroy(); self.filter_win = None; return
@@ -458,4 +568,3 @@ class StudentDirectoryApp(tk.Tk):
  
 if __name__ == "__main__":
     app = StudentDirectoryApp(); app.mainloop()
- 
