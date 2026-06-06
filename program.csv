@@ -1,2 +1,38 @@
 prog_code,name,college_code
-01,Bs Computer Science,01
+P001,BS Computer Science,CCS
+P002,BS Computer Applications,CCS
+P003,BS Information Systems,CCS
+P004,BS Information Technology,CCS
+P005,BS Nursing,CHS
+P006,BS Microbiology,CSM
+P007,BS Plant Biology,CSM
+P008,BS Biodiversity,CSM
+P009,BS Marine Biology,CSM
+P010,BS Mathematics,CSM
+P011,BS Statistics,CSM
+P012,BS Chemistry,CSM
+P013,BS Physics,CSM
+P014,BS Accountancy,CEBA
+P015,BS Economics,CEBA
+P016,BS Entrepreneurship,CEBA
+P017,BS Hospitality Management,CEBA
+P018,BSBA Business Economics,CEBA
+P019,BSBA Marketing Management,CEBA
+P020,BS Chemical Engineering,COE
+P021,BS Mechanical Engineering,COE
+P022,BS Ceramics Engineering,COE
+P023,BS Computer Engineering,COE
+P024,BS Electrical Engineering,COE
+P025,BS Electronics Engineering,COE
+P026,BS Metallurgical Engineering,COE
+P027,BS Mining Engineering,COE
+P028,BS Industrial Automation and Mechatronics,COE
+P029,BSEd Biology,CED
+P030,BSEd Physics,CED
+P031,BSEd Chemistry,CED
+P032,BSEd Mathematics,CED
+P033,BSEd Filipino,CED
+P034,BSEd Science and Mathematics,CED
+P035,BTLED Home Economics,CED
+P036,BTLED Industrial Arts,CED
+P037,BTVLED Drafting Technology,CED
