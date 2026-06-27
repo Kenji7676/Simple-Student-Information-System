@@ -64,7 +64,7 @@ class StudentDirectoryApp(tk.Tk):
         self.edit_btn = tk.Button(self.button_container, text="📝", font=("Arial", 18), bg="#d2b48c", fg="white", command=self.toggle_edit_mode, bd=0, width=2)
         self.edit_btn.pack(side="left")
         self.bind_all("<Button-1>", self.check_filter_focus)
-        self.center_window(1150, 600)
+        self.center_window(1200, 600)
         self.switch_section("Students")
         self._start_auto_refresh()
  
@@ -84,7 +84,6 @@ class StudentDirectoryApp(tk.Tk):
                 self._file_mtimes[f] = mtime
                 changed = True
         if changed and not self._auto_refresh_paused:
-            # Only refresh if no popup is open (avoids disrupting edits)
             popup_open = (
                 (self.add_popup_win and self.add_popup_win.winfo_exists()) or
                 (self.edit_popup_win and self.edit_popup_win.winfo_exists()) or
@@ -157,6 +156,24 @@ class StudentDirectoryApp(tk.Tk):
         elif section == "Programs": self.show_programs()
         elif section == "Colleges": self.show_colleges()
  
+    def sort_column(self, col, reverse):
+        """Generic column sorting function for Treeview."""
+        data_list = [(self.tree.set(k, col), k) for k in self.tree.get_children("")]
+        
+        def natural_sort_key(item):
+            val = item[0]
+            if val.isdigit():
+                return (0, int(val))
+            return (1, val.lower())
+
+        data_list.sort(key=natural_sort_key, reverse=reverse)
+
+        for index, (val, k) in enumerate(data_list):
+            self.tree.move(k, "", index)
+
+        # Reverse the sort tracking behavior for the next click
+        self.tree.heading(col, command=lambda _col=col: self.sort_column(_col, not reverse))
+
     def display_table(self, columns, rows, section_type):
         for w in self.content_frame.winfo_children(): w.destroy()
         header = tk.Frame(self.content_frame, bg="white")
@@ -182,17 +199,18 @@ class StudentDirectoryApp(tk.Tk):
             tk.Button(ctrls, text="Search", bg="#d2b48c", fg="white", command=lambda: self.switch_section(section_type)).pack(side="left", padx=2)
             
             if section_type == "Students":
-                f_btn = tk.Button(ctrls, text="Filter ▽", bg="#8b4513", fg="white", padx=12, command=lambda: self.show_filter_menu(f_btn))
-                f_btn.pack(side="left", padx=2)
+                sort_btn = tk.Button(ctrls, text="Filters ▽", bg="#8b4513", fg="white", padx=12, command=lambda: self.show_filter_menu(sort_btn))
+                sort_btn.pack(side="left", padx=2)
  
         display_cols = ["Select"] + columns if self.edit_mode else columns
         self.tree = ttk.Treeview(self.content_frame, columns=display_cols, show="headings")
         
         for col in self.tree["columns"]: 
-            self.tree.heading(col, text=col)
             if col == "Select":
+                self.tree.heading(col, text=col)
                 self.tree.column(col, width=50, minwidth=50, anchor="center", stretch=False)
             else:
+                self.tree.heading(col, text=col, command=lambda _col=col: self.sort_column(_col, False))
                 self.tree.column(col, width=100, minwidth=80, anchor="center", stretch=True)
         
         tree_scroll = ttk.Scrollbar(self.content_frame, orient="vertical", command=self.tree.yview)
@@ -214,17 +232,24 @@ class StudentDirectoryApp(tk.Tk):
         c_map = {c["college_code"]: c["name"] for c in read_csv(COLLEGE_CSV)}
         def _prog(s): return p_map.get(s["prog_code"], {}).get("name", "Not Enrolled") if s["prog_code"] else "Not Enrolled"
         def _coll(s): return c_map.get(p_map.get(s["prog_code"], {}).get("college_code"), "N/A") if s["prog_code"] else "N/A"
-        rows = [[s["id"], f"{s['lastname']}, {s['firstname']}", s["gender"], s["year"], _prog(s), _coll(s)] for s in d]
+        def _pcode(s): return s["prog_code"] if s["prog_code"] else "N/A"
+        def _ccode(s): return p_map.get(s["prog_code"], {}).get("college_code", "N/A") if s["prog_code"] else "N/A"
+        
+        rows = [[s["id"], f"{s['lastname']}, {s['firstname']}", s["gender"], s["year"], _pcode(s), _prog(s), _ccode(s), _coll(s)] for s in d]
         q = self.search_var.get().lower()
-        fdata = [r for r in rows if (not q or any(q in str(c).lower() for c in r)) and (not self.active_filters["gender"] or r[2] in self.active_filters["gender"]) and (not self.active_filters["year"] or str(r[3]) in self.active_filters["year"]) and (not self.active_filters["program"] or r[4] in self.active_filters["program"]) and (not self.active_filters["college"] or r[5] in self.active_filters["college"])]
-        self.display_table(["ID", "Name", "Gender", "Year", "Program", "College"], fdata, "Students")
+        fdata = [r for r in rows if (not q or any(q in str(c).lower() for c in r)) and \
+                 (not self.active_filters["gender"] or r[2] in self.active_filters["gender"]) and \
+                 (not self.active_filters["year"] or str(r[3]) in self.active_filters["year"]) and \
+                 (not self.active_filters["program"] or r[5] in self.active_filters["program"]) and \
+                 (not self.active_filters["college"] or r[7] in self.active_filters["college"])]
+        self.display_table(["ID", "Name", "Gender", "Year", "Program Code", "Program Name", "College Code", "College Name"], fdata, "Students")
  
     def show_programs(self):
         d = read_csv(PROGRAM_CSV); c_map = {c["college_code"]: c["name"] for c in read_csv(COLLEGE_CSV)}
-        rows = [[p["prog_code"], p["name"], c_map.get(p["college_code"], "N/A")] for p in d]
+        rows = [[p["prog_code"], p["name"], p["college_code"], c_map.get(p["college_code"], "N/A")] for p in d]
         q = self.search_var.get().lower()
         fdata = [r for r in rows if not q or any(q in str(c).lower() for c in r)]
-        self.display_table(["Code", "Program Name", "College"], fdata, "Programs")
+        self.display_table(["Code", "Program Name", "College Code", "College Name"], fdata, "Programs")
  
     def show_colleges(self):
         d = read_csv(COLLEGE_CSV); rows = [[c["college_code"], c["name"]] for c in d]
@@ -373,7 +398,6 @@ class StudentDirectoryApp(tk.Tk):
             new_lastname = ln_ent.get().title().strip()
             new_gender = gen_sel["val"]; new_year = year_sel["val"]; new_prog_name = prog_sel["val"]
 
-            # Validate ID format
             if not re.match(r"^\d{4}-\d{4}$", new_id):
                 id_err.config(text="ID must follow format YYYY-NNNN (e.g. 2024-0001)"); return
 
@@ -387,7 +411,6 @@ class StudentDirectoryApp(tk.Tk):
             students_data = read_csv(STUDENT_CSV)
             old_id = student_data["id"]
 
-            # Duplicate check — only if the ID actually changed
             if new_id != old_id:
                 if any(s["id"] == new_id for s in students_data):
                     id_err.config(text=f"ID '{new_id}' already exists."); return
@@ -467,24 +490,20 @@ class StudentDirectoryApp(tk.Tk):
             old_code = prog_data["prog_code"]
             programs = read_csv(PROGRAM_CSV)
 
-            # Duplicate check — only if the code actually changed
             if new_code != old_code:
                 if any(p["prog_code"] == new_code for p in programs):
                     code_err.config(text=f"Program code '{new_code}' already exists."); return
 
-            # Update program record (code + name + college)
             for i, p in enumerate(programs):
                 if p["prog_code"] == old_code:
                     programs[i] = {"prog_code": new_code, "name": new_name, "college_code": new_college_code}; break
             write_csv(PROGRAM_CSV, programs, ["prog_code", "name", "college_code"])
 
-            # Cascade: update all students whose prog_code matched the old code
             if new_code != old_code:
                 students = read_csv(STUDENT_CSV)
-                affected = 0
                 for i, s in enumerate(students):
                     if s["prog_code"] == old_code:
-                        students[i]["prog_code"] = new_code; affected += 1
+                        students[i]["prog_code"] = new_code
                 write_csv(STUDENT_CSV, students, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
 
             self.show_programs()
@@ -550,18 +569,15 @@ class StudentDirectoryApp(tk.Tk):
             old_code = college_data["college_code"]
             colleges = read_csv(COLLEGE_CSV)
 
-            # Duplicate check — only if the code actually changed
             if new_code != old_code:
                 if any(c["college_code"] == new_code for c in colleges):
                     code_err.config(text=f"College code '{new_code}' already exists."); return
 
-            # Update college record
             for i, c in enumerate(colleges):
                 if c["college_code"] == old_code:
                     colleges[i] = {"college_code": new_code, "name": new_name}; break
             write_csv(COLLEGE_CSV, colleges, ["college_code", "name"])
 
-            # Cascade: update all programs whose college_code matched the old code
             if new_code != old_code:
                 programs = read_csv(PROGRAM_CSV)
                 for i, p in enumerate(programs):
@@ -569,7 +585,6 @@ class StudentDirectoryApp(tk.Tk):
                         programs[i]["college_code"] = new_code
                 write_csv(PROGRAM_CSV, programs, ["prog_code", "name", "college_code"])
 
-            # Count affected for confirmation message
             programs_now = read_csv(PROGRAM_CSV)
             affected_prog_codes = [p["prog_code"] for p in programs_now if p["college_code"] == new_code]
             students = read_csv(STUDENT_CSV)
@@ -659,7 +674,6 @@ class StudentDirectoryApp(tk.Tk):
         if not to_del:
             return
 
-        # Build confirmation message with cascade warning
         confirm_msg = f"Delete {len(to_del)} item(s)?"
         if section == "Programs":
             students = read_csv(STUDENT_CSV)
@@ -677,12 +691,9 @@ class StudentDirectoryApp(tk.Tk):
         if not messagebox.askyesno("Confirm", confirm_msg):
             return
 
-        # Perform deletion
         write_csv(fn, [r for r in data if r[pk] not in to_del], head)
 
-        # Cascade effects
         if section == "Programs":
-            # Unenroll students whose program was deleted
             students = read_csv(STUDENT_CSV)
             for i, s in enumerate(students):
                 if s["prog_code"] in to_del:
@@ -690,7 +701,6 @@ class StudentDirectoryApp(tk.Tk):
             write_csv(STUDENT_CSV, students, ["id", "firstname", "lastname", "prog_code", "year", "gender"])
 
         elif section == "Colleges":
-            # Delete all programs under deleted colleges, then unenroll affected students
             programs = read_csv(PROGRAM_CSV)
             deleted_prog_codes = [p["prog_code"] for p in programs if p["college_code"] in to_del]
             remaining_programs = [p for p in programs if p["college_code"] not in to_del]

@@ -1,8 +1,8 @@
 prog_code,name,college_code
-P001,BS Computer Science,CCS
-P002,BS Computer Applications,CCS
-P003,BS Information Systems,CCS
-P004,BS Information Technology,CCS
+P001,BS Computer Science,CCR
+P002,BS Computer Applications,CCR
+P003,BS Information Systems,CCR
+P004,BS Information Technology,CCR
 P005,BS Nursing,CHS
 P006,BS Microbiology,CSM
 P007,BS Plant Biology,CSM
